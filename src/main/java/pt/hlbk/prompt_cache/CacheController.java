@@ -8,8 +8,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class CacheController {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CacheController.class);
+    private static final double SIMILARITY_THRESHOLD = 0.85;
 
     @Autowired
     private EmbeddingModel embeddingModel;
@@ -35,8 +36,21 @@ public class CacheController {
 
         String cachedResult = embeddingCache.get(embeddingsList); // Direct cache lookup
         if (cachedResult != null) {
-            System.out.println("Cache hit!");
+            LOGGER.info("Cache hit!");
             return ResponseEntity.ok(new CacheResponse(cachedResult));
+        }
+
+        for (Map.Entry<List<Float>, String> entry : embeddingCache.entrySet()) {
+
+            List<Float> cachedEmbeddings = entry.getKey();
+
+            double similarity = cosineSimilarity(embeddingsList, cachedEmbeddings);
+            LOGGER.info("Similarity between embeddings for prompt {}: {}", prompt, similarity);
+
+            if (similarity >= SIMILARITY_THRESHOLD) {
+                System.out.println("Similar embedding found in cache!");
+                return ResponseEntity.ok(new CacheResponse(entry.getValue()));
+            }
         }
 
         return ResponseEntity.notFound().build();
@@ -54,5 +68,19 @@ public class CacheController {
         embeddingCache.put(embeddingsList, cacheRequest.response());
         LOGGER.info("Cache now {}", embeddingCache);
         return ResponseEntity.ok(new CacheResponse(cacheRequest.response()));
+    }
+
+    private double cosineSimilarity(List<Float> vec1, List<Float> vec2) {
+        double dotProduct = 0.0;
+        double norm1 = 0.0;
+        double norm2 = 0.0;
+
+        for (int i = 0; i < vec1.size(); i++) {
+            dotProduct += vec1.get(i) * vec2.get(i);
+            norm1 += vec1.get(i) * vec1.get(i);
+            norm2 += vec2.get(i) * vec2.get(i);
+        }
+
+        return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
     }
 }
