@@ -8,7 +8,6 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
-import java.util.List;
 import java.util.Map;
 
 @Component
@@ -17,7 +16,7 @@ public class PromptCache {
     private static final Logger LOGGER = LoggerFactory.getLogger(PromptCache.class);
     private static final double SIMILARITY_THRESHOLD = 0.85;
 
-    private final Cache<List<Float>, String> cache;
+    private final Cache<FloatArrayWrapper, String> cache;
 
     public PromptCache() {
         this.cache = Caffeine.newBuilder()
@@ -26,15 +25,15 @@ public class PromptCache {
                 .build();
     }
 
-    public String get(List<Float> embeddings) {
-        String cachedResult = cache.getIfPresent(embeddings);
+    public String get(float[] embeddings) {
+        String cachedResult = cache.getIfPresent(new FloatArrayWrapper(embeddings));
         if (cachedResult != null) {
             return cachedResult;
         }
 
-        for (Map.Entry<List<Float>, String> entry : cache.asMap().entrySet()) {
+        for (Map.Entry<FloatArrayWrapper, String> entry : cache.asMap().entrySet()) {
 
-            List<Float> cachedEmbeddings = entry.getKey();
+            float[] cachedEmbeddings = entry.getKey().array();
 
             double similarity = cosineSimilarity(embeddings, cachedEmbeddings);
             LOGGER.info("Similarity between embeddings for request: {}", similarity);
@@ -47,19 +46,19 @@ public class PromptCache {
         return null;
     }
 
-    public void put(List<Float> embeddings, String result) {
-        cache.put(embeddings, result);
+    public void put(float[] embeddings, String result) {
+        cache.put(new FloatArrayWrapper(embeddings), result);
     }
 
-    private double cosineSimilarity(List<Float> vec1, List<Float> vec2) {
+    private double cosineSimilarity(float[] vec1, float[] vec2) {
         double dotProduct = 0.0;
         double norm1 = 0.0;
         double norm2 = 0.0;
 
-        for (int i = 0; i < vec1.size(); i++) {
-            dotProduct += vec1.get(i) * vec2.get(i);
-            norm1 += vec1.get(i) * vec1.get(i);
-            norm2 += vec2.get(i) * vec2.get(i);
+        for (int i = 0; i < vec1.length; i++) {
+            dotProduct += vec1[i] * vec2[i];
+            norm1 += vec1[i] * vec1[i];
+            norm2 += vec2[i] * vec2[i];
         }
 
         return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
