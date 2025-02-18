@@ -8,7 +8,6 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
-import java.util.Map;
 
 @Component
 public class PromptCache {
@@ -26,16 +25,15 @@ public class PromptCache {
     }
 
     public String get(float[] embeddings) {
-        String cachedResult = cache.getIfPresent(new FloatArrayWrapper(embeddings));
+        var cachedResult = cache.getIfPresent(new FloatArrayWrapper(embeddings));
         if (cachedResult != null) {
             return cachedResult;
         }
 
-        for (Map.Entry<FloatArrayWrapper, String> entry : cache.asMap().entrySet()) {
+        for (var entry : cache.asMap().entrySet()) {
 
-            float[] cachedEmbeddings = entry.getKey().array();
-
-            double similarity = cosineSimilarity(embeddings, cachedEmbeddings);
+            var cachedEmbeddings = entry.getKey().array();
+            var similarity = cosineSimilarity(embeddings, cachedEmbeddings);
             LOGGER.info("Similarity between embeddings for request: {}", similarity);
 
             if (similarity >= SIMILARITY_THRESHOLD) {
@@ -51,9 +49,9 @@ public class PromptCache {
     }
 
     private double cosineSimilarity(float[] vec1, float[] vec2) {
-        double dotProduct = 0.0;
-        double norm1 = 0.0;
-        double norm2 = 0.0;
+        var dotProduct = 0.0;
+        var norm1 = 0.0;
+        var norm2 = 0.0;
 
         for (int i = 0; i < vec1.length; i++) {
             dotProduct += vec1[i] * vec2[i];
