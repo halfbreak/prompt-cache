@@ -1,13 +1,24 @@
 package pt.hlbk.prompt_cache.core;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
+import jakarta.annotation.PreDestroy;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.KnnFloatVectorField;
+import org.apache.lucene.document.StoredField;
+import org.apache.lucene.index.DirectoryReader;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.KnnFloatVectorQuery;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.store.ByteBuffersDirectory;
+import org.apache.lucene.store.Directory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
-import java.time.temporal.ChronoUnit;
+import java.io.IOException;
 
 @Component
 public class PromptCache {
@@ -15,50 +26,60 @@ public class PromptCache {
     private static final Logger LOGGER = LoggerFactory.getLogger(PromptCache.class);
     private static final double SIMILARITY_THRESHOLD = 0.85;
 
-    private final Cache<FloatArrayWrapper, String> cache;
+    private final Directory directory;
+    private final IndexWriter writer;
 
-    public PromptCache() {
-        this.cache = Caffeine.newBuilder()
-                .maximumSize(10000)
-                .expireAfterAccess(Duration.of(1, ChronoUnit.HOURS))
-                .build();
+    public PromptCache() throws IOException {
+        this.directory = new ByteBuffersDirectory();
+        IndexWriterConfig config = new IndexWriterConfig(new StandardAnalyzer());
+        this.writer = new IndexWriter(directory, config);
+    }
+
+    @PreDestroy
+    public void stop() {
+        try {
+            this.writer.close();
+            this.directory.close();
+        } catch (IOException e) {
+            LOGGER.error("Error closing the directory", e);
+        }
     }
 
     public String get(float[] embeddings) {
-        var cachedResult = cache.getIfPresent(new FloatArrayWrapper(embeddings));
-        if (cachedResult != null) {
-            return cachedResult;
-        }
-
-        for (var entry : cache.asMap().entrySet()) {
-
-            var cachedEmbeddings = entry.getKey().array();
-            var similarity = cosineSimilarity(embeddings, cachedEmbeddings);
-            LOGGER.info("Similarity between embeddings for request: {}", similarity);
-
-            if (similarity >= SIMILARITY_THRESHOLD) {
-                LOGGER.info("Similar embedding found in cache!");
-                return entry.getValue();
+        try {
+            DirectoryReader reader = DirectoryReader.open(directory);
+            IndexSearcher searcher = new IndexSearcher(reader);
+            KnnFloatVectorQuery query = new KnnFloatVectorQuery("prompt", embeddings, 1);
+            TopDocs results = searcher.search(query, 1);
+            if (results.totalHits.value == 0) {
+                return null;
             }
+
+            ScoreDoc scoreDoc = results.scoreDocs[0];
+            LOGGER.info("Found doc {} with similarity {}", scoreDoc.doc, scoreDoc.score);
+            var retrievedDoc = searcher.doc(scoreDoc.doc);
+            var result = retrievedDoc.get("result");
+            if (result != null && scoreDoc.score >= SIMILARITY_THRESHOLD) {
+                return result;
+            }
+            reader.close();
+        } catch (IOException e) {
+            LOGGER.info("Failed to open index", e);
+            throw new RuntimeException(e);
         }
         return null;
     }
 
     public void put(float[] embeddings, String result) {
-        cache.put(new FloatArrayWrapper(embeddings), result);
-    }
+        var doc = new Document();
+        doc.add(new KnnFloatVectorField("prompt", embeddings));
+        doc.add(new StoredField("result", result));
 
-    private double cosineSimilarity(float[] vec1, float[] vec2) {
-        var dotProduct = 0.0;
-        var norm1 = 0.0;
-        var norm2 = 0.0;
-
-        for (int i = 0; i < vec1.length; i++) {
-            dotProduct += vec1[i] * vec2[i];
-            norm1 += vec1[i] * vec1[i];
-            norm2 += vec2[i] * vec2[i];
+        try {
+            writer.addDocument(doc);
+            writer.commit();
+        } catch (IOException e) {
+            LOGGER.error("Error indexing document", e);
         }
-
-        return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
     }
 }

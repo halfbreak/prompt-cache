@@ -28,9 +28,9 @@
 			<artifactId>spring-ai-ollama-spring-boot-starter</artifactId>
 		</dependency>
 		<dependency>
-			<groupId>com.github.ben-manes.caffeine</groupId>
-			<artifactId>caffeine</artifactId>
-			<version>${caffeine.version}</version>
+			<groupId>org.apache.lucene</groupId>
+			<artifactId>lucene-core</artifactId>
+			<version>9.9.0</version>
 		</dependency>
 
 		<dependency>
