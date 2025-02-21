@@ -2,14 +2,8 @@ package pt.hlbk.prompt_cache.core;
 
 import jakarta.annotation.PreDestroy;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.document.KnnFloatVectorField;
-import org.apache.lucene.document.LongPoint;
-import org.apache.lucene.document.StoredField;
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.IndexWriter;
-import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.index.Term;
+import org.apache.lucene.document.*;
+import org.apache.lucene.index.*;
 import org.apache.lucene.search.*;
 import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.store.Directory;
@@ -19,7 +13,12 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.List;
 
 @Component
@@ -58,10 +57,11 @@ public class PromptCache {
             if (results.totalHits.value == 0) {
                 return null;
             }
+            StoredFields storedFields = searcher.storedFields();
 
             ScoreDoc scoreDoc = results.scoreDocs[0];
             LOGGER.info("Found doc {} with similarity {}", scoreDoc.doc, scoreDoc.score);
-            var retrievedDoc = searcher.doc(scoreDoc.doc);
+            var retrievedDoc = storedFields.document(scoreDoc.doc);
             var result = retrievedDoc.get("result");
             if (result != null && scoreDoc.score >= SIMILARITY_THRESHOLD) {
                 return result;
@@ -77,16 +77,33 @@ public class PromptCache {
     public void put(float[] embeddings, String result) {
         var doc = new Document();
         long timestamp = System.currentTimeMillis();
+        String uniqueId = vectorToId(embeddings);
+        Term uniqueTerm = new Term("vectorId", uniqueId);
+
         doc.add(new KnnFloatVectorField("prompt", embeddings));
         doc.add(new StoredField("result", result));
         doc.add(new LongPoint("timestamp", timestamp));
         doc.add(new StoredField("timestamp", timestamp));
+        doc.add(new StringField("vectorId", uniqueId, Field.Store.YES));
 
         try {
+            writer.deleteDocuments(uniqueTerm);
             writer.addDocument(doc);
             writer.commit();
         } catch (IOException e) {
             LOGGER.error("Error indexing document", e);
+        }
+    }
+
+    private static String vectorToId(float[] vector) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            ByteBuffer buffer = ByteBuffer.allocate(vector.length * 4);
+            for (float v : vector) buffer.putFloat(v);
+            byte[] hash = digest.digest(buffer.array());
+            return Base64.getEncoder().encodeToString(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
         }
     }
 
